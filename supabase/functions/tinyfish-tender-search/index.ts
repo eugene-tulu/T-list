@@ -174,6 +174,12 @@ Return JSON:
                       console.log(`[${agentId}] result type:`, typeof resultData);
                       
                       if (resultData) {
+                        // Handle nested result object (TinyFish sometimes wraps: { result: "```json...```" })
+                        if (typeof resultData === 'object' && resultData !== null && 'result' in resultData) {
+                          console.log(`[${agentId}] Detected nested result object, unwrapping`);
+                          resultData = (resultData as any).result;
+                        }
+                        
                         // Handle string results (LLM might return JSON as string)
                         if (typeof resultData === 'string') {
                           try {
