@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Sector, Tender, AgentState, TenderSearchState, SupplierProfile } from '@/types/tender';
 
 const generateId = () => Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -17,10 +17,22 @@ export function useTenderSearch() {
   });
 
   const abortControllersRef = useRef<AbortController[]>([]);
+  const timeoutRefsRef = useRef<{
+    streamingUrl?: NodeJS.Timeout;
+    execution?: NodeJS.Timeout;
+  }>({});
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      abortControllersRef.current.forEach(c => c.abort());
+      if (timeoutRefsRef.current.streamingUrl) clearTimeout(timeoutRefsRef.current.streamingUrl);
+      if (timeoutRefsRef.current.execution) clearTimeout(timeoutRefsRef.current.execution);
+    };
+  }, []);
 
   const createAgentsFromLinks = (links: string[]): AgentState[] => {
     return links.map((url, index) => {
-      // Extract domain name for display
       let name = 'Unknown Site';
       try {
         const urlObj = new URL(url);
@@ -42,33 +54,26 @@ export function useTenderSearch() {
 
   const calculateScore = (tender: Tender, profile: SupplierProfile): number => {
     let score = 0;
-    const missingRequirements: string[] = [];
 
-    // Sector match: highest weight
+    // Sector match
     if (tender.industryCategory === profile.sector) {
       score += 50;
-    } else {
-      missingRequirements.push('Industry sector mismatch');
     }
 
-    // Country match: important
-    if (tender.countryRegion.toLowerCase() === profile.country.toLowerCase()) {
+    // Country match
+    if (tender.countryRegion?.toLowerCase() === profile.country.toLowerCase()) {
       score += 30;
-    } else {
-      missingRequirements.push('Country/region mismatch');
     }
 
     // Company size match
     if (tender.requiredCompanySize && profile.companySize) {
       if (tender.requiredCompanySize === profile.companySize || tender.requiredCompanySize === 'any') {
         score += 15;
-      } else {
-        missingRequirements.push(`Company size: ${profile.companySize} vs required ${tender.requiredCompanySize}`);
       }
     }
 
     // Certifications match
-    if (tender.requiredCertifications && tender.requiredCertifications.length > 0 && profile.certifications) {
+    if (tender.requiredCertifications?.length > 0 && profile.certifications) {
       const missingCerts = tender.requiredCertifications.filter(
         (cert: string) => !profile.certifications?.some(
           (pc: string) => pc.toLowerCase() === cert.toLowerCase()
@@ -76,22 +81,18 @@ export function useTenderSearch() {
       );
       if (missingCerts.length === 0) {
         score += 10;
-      } else {
-        missingRequirements.push(`Missing certifications: ${missingCerts.join(', ')}`);
       }
     }
 
-    // Deadline bonus: sooner deadline gets more points (inverse of days remaining)
+    // Deadline bonus
     const deadline = new Date(tender.submissionDeadline);
     const today = new Date();
     const daysRemaining = Math.max(0, Math.floor((deadline.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
     if (daysRemaining > 0) {
-      score += Math.max(0, 20 - daysRemaining); // Max 20 points for immediate deadlines
-    } else {
-      missingRequirements.push('Deadline has passed');
+      score += Math.max(0, 20 - daysRemaining);
     }
 
-    // Complexity preference: SMEs may prefer low complexity, enterprises can handle high
+    // Complexity preference
     if (tender.complexityLevel && profile.companySize) {
       if (profile.companySize === 'SME' && tender.complexityLevel === 'low') {
         score += 5;
@@ -100,10 +101,7 @@ export function useTenderSearch() {
       }
     }
 
-    // Ensure minimum score of 1 for non-zero matches
-    if (score > 0) score = Math.max(1, score);
-
-    return score;
+    return score > 0 ? score : 0;
   };
 
   const analyzeMatch = (tender: Tender, profile: SupplierProfile): { reason: string; missing: string[] } => {
@@ -116,7 +114,7 @@ export function useTenderSearch() {
       missing.push(`Sector: ${profile.sector} vs tender ${tender.industryCategory}`);
     }
 
-    if (tender.countryRegion.toLowerCase() === profile.country.toLowerCase()) {
+    if (tender.countryRegion?.toLowerCase() === profile.country.toLowerCase()) {
       reasons.push('Local opportunity');
     } else {
       missing.push(`Country: ${profile.country} vs ${tender.countryRegion}`);
@@ -130,13 +128,13 @@ export function useTenderSearch() {
       }
     }
 
-    if (tender.requiredCertifications && tender.requiredCertifications.length > 0 && profile.certifications) {
+    if (tender.requiredCertifications?.length > 0 && profile.certifications) {
       const missingCerts = tender.requiredCertifications.filter(
         (cert: string) => !profile.certifications?.some(
           (pc: string) => pc.toLowerCase() === cert.toLowerCase()
         )
       );
-      if (missingCerts.length === 0 && tender.requiredCertifications.length > 0) {
+      if (missingCerts.length === 0) {
         reasons.push(`Has all ${tender.requiredCertifications.length} required certs`);
       } else if (missingCerts.length > 0) {
         missing.push(`Need: ${missingCerts.join(', ')}`);
@@ -157,7 +155,6 @@ export function useTenderSearch() {
   };
 
   const startSearch = useCallback(async (sector: Sector, links: string[], profile: SupplierProfile) => {
-    // Initialize agents from provided links
     const initialAgents = createAgentsFromLinks(links);
     
     setState(prev => ({
@@ -170,281 +167,297 @@ export function useTenderSearch() {
       selectedTenders: new Set(),
     }));
 
-    // Store profile locally for scoring (avoid closure staleness)
     const localProfile = profile;
 
-    // Clear any existing abort controllers
-    abortControllersRef.current.forEach(controller => controller.abort());
+    // Clear any existing abort controllers and timeouts
+    abortControllersRef.current.forEach(c => c.abort());
+    if (timeoutRefsRef.current.streamingUrl) clearTimeout(timeoutRefsRef.current.streamingUrl);
+    if (timeoutRefsRef.current.execution) clearTimeout(timeoutRefsRef.current.execution);
     abortControllersRef.current = [];
+    timeoutRefsRef.current = {};
 
-    // Launch all agents in parallel with SSE streaming
+    // Launch all agents in parallel
     const agentPromises = links.map(async (url, index) => {
       const agentId = `agent-${index}`;
       const abortController = new AbortController();
       abortControllersRef.current.push(abortController);
       let connectionTimedOut = false;
-      
+
       try {
         // Update agent to connecting
         setState(prev => ({
           ...prev,
           agents: prev.agents.map(a =>
             a.id === agentId
-              ? { ...a, status: 'connecting' as const, message: 'Connecting to TinyFish...' }
+              ? { ...a, status: 'connecting', message: 'Connecting to TinyFish...' }
               : a
           ),
         }));
 
-        // Set a timeout for connection (30 seconds)
-        const timeoutPromise = new Promise((resolve) => {
-          setTimeout(() => {
-            connectionTimedOut = true;
-            resolve({ type: 'TIMEOUT', agentId });
-          }, 30000);
-        });
+        // Connection timeout (30s)
+        const connectionTimeout = setTimeout(() => {
+          connectionTimedOut = true;
+        }, 30000);
 
-        // Use fetch with SSE streaming
-        const fetchPromise = fetch(`${SUPABASE_URL}/functions/v1/tinyfish-tender-search`, {
+        // Fetch from edge function
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/tinyfish-tender-search`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
           },
-          body: JSON.stringify({
-            sector,
-            url: url,
-            agentId,
-          }),
+          body: JSON.stringify({ sector, url, agentId }),
           signal: abortController.signal,
         });
 
-        const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
+        clearTimeout(connectionTimeout);
 
-        // Check if timeout occurred
         if (connectionTimedOut) {
           throw new Error('Connection timeout - agent took too long to start');
         }
 
         if (!response.ok) {
-          throw new Error(`HTTP error: ${response.status}`);
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
 
+        // Stream processing
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
         let receivedStreamingUrl = false;
 
-        // Set a timeout for receiving the first STREAMING_URL event (60 seconds)
-        const streamingUrlTimeout = setTimeout(() => {
+        // Timeout for first STREAMING_URL (60s)
+        timeoutRefsRef.current.streamingUrl = setTimeout(() => {
           if (!receivedStreamingUrl) {
-            console.warn(`Agent ${agentId}: No streaming URL received after 60 seconds, continuing without live preview`);
+            console.warn(`Agent ${agentId}: No streaming URL after 60s`);
             setState(prev => ({
               ...prev,
               agents: prev.agents.map(a =>
                 a.id === agentId
-                  ? {
-                      ...a,
-                      status: 'searching' as const,
-                      message: 'Processing (no live preview available)',
-                    }
+                  ? { ...a, status: 'searching', message: 'Processing (no live preview)' }
                   : a
               ),
             }));
           }
         }, 60000);
 
-        // Set an overall execution timeout (5 minutes) to prevent agents from running forever
-        const executionTimeout = setTimeout(() => {
-          console.warn(`Agent ${agentId}: Execution timeout after 5 minutes`);
+        // Overall execution timeout (5min)
+        timeoutRefsRef.current.execution = setTimeout(() => {
+          console.warn(`Agent ${agentId}: Execution timeout after 5min`);
           setState(prev => ({
             ...prev,
             agents: prev.agents.map(a =>
               a.id === agentId
-                ? {
-                    ...a,
-                    status: 'complete' as const,
-                    message: 'Timed out - incomplete results',
-                    tenders: a.tenders || [],
-                  }
+                ? { ...a, status: 'complete', message: 'Timed out - incomplete results', tenders: a.tenders || [] }
                 : a
             ),
           }));
-          // Force close the reader
           abortController.abort();
         }, 300000);
 
-        if (reader) {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        if (!reader) {
+          throw new Error('No response body reader');
+        }
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                try {
-                  const data = JSON.parse(line.slice(6));
-                  
-                  // Handle streaming URL - show live preview immediately
-                  if (data.type === 'STREAMING_URL' && data.streamingUrl) {
-                    receivedStreamingUrl = true;
-                    clearTimeout(streamingUrlTimeout);
-                    console.log(`Agent ${agentId} received streaming URL:`, data.streamingUrl);
-                    setState(prev => ({
-                      ...prev,
-                      agents: prev.agents.map(a =>
-                        a.id === agentId
-                          ? {
-                              ...a,
-                              status: 'searching' as const,
-                              message: 'Browsing website...',
-                              streamingUrl: data.streamingUrl,
-                            }
-                          : a
-                      ),
-                    }));
-                  }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-                  // Handle status updates
-                  if (data.type === 'STATUS' && data.message) {
-                    setState(prev => ({
-                      ...prev,
-                      agents: prev.agents.map(a =>
-                        a.id === agentId
-                          ? { ...a, message: data.message }
-                          : a
-                      ),
-                    }));
-                  }
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
 
-                   // Handle completion with tenders
-                   if (data.type === 'COMPLETE' && data.tenders) {
-                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                     const newTenders: Tender[] = data.tenders.map((t: any) => ({
-                       id: generateId(),
-                       tenderTitle: t['Tender Title'] || t.tenderTitle || 'Unknown',
-                       tenderId: t['Tender ID'] || t.tenderId || 'N/A',
-                       issuingAuthority: t['Issuing Authority'] || t.issuingAuthority || 'Unknown',
-                       countryRegion: t['Country / Region'] || t.countryRegion || 'Singapore',
-                       tenderType: t['Tender Type'] || t.tenderType || 'N/A',
-                       publicationDate: t['Publication Date'] || t.publicationDate || 'N/A',
-                       submissionDeadline: t['Submission Deadline'] || t.submissionDeadline || 'N/A',
-                       tenderStatus: t['Tender Status'] || t.tenderStatus || 'Open',
-                       officialTenderUrl: t['Official Tender URL'] || t.officialTenderUrl || url,
-                       briefDescription: t['Brief Description'] || t.briefDescription || 'No description',
-                       eligibilityCriteria: t['Eligibility Criteria'] || t.eligibilityCriteria || 'See tender',
-                       industryCategory: t['Industry / Category'] || t.industryCategory || sector,
-                       sourceUrl: url,
-                       // New classification fields
-                       complexityLevel: t['Complexity Level'] || t.complexityLevel,
-                       requiredCompanySize: t['Required Company Size'] || t.requiredCompanySize,
-                       requiredCertifications: t['Required Certifications'] || t.requiredCertifications || [],
-                       evaluationCriteria: t['Evaluation Criteria'] || t.evaluationCriteria,
-                       scopeOfWork: t['Scope of Work'] || t.scopeOfWork,
-                       estimatedContractValue: t['Estimated Contract Value'] || t.estimatedContractValue || null,
-                     }));
+            try {
+              const data = JSON.parse(line.slice(6));
 
-                     // Calculate scores and match analysis for each tender based on supplier profile
-                     const scoredTenders = newTenders.map(tender => {
-                       const score = localProfile ? calculateScore(tender, localProfile) : 1;
-                       const analysis = localProfile ? analyzeMatch(tender, localProfile) : { reason: '', missing: [] };
-                       return {
-                         ...tender,
-                         score,
-                         matchReason: analysis.reason,
-                         missingRequirements: analysis.missing,
-                       };
-                     });
-
-                     clearTimeout(executionTimeout);
-                     setState(prev => ({
-                       ...prev,
-                       tenders: [...prev.tenders, ...scoredTenders],
-                       agents: prev.agents.map(a =>
-                         a.id === agentId
-                           ? {
-                               ...a,
-                               status: 'complete' as const,
-                               message: `Found ${scoredTenders.length} tenders`,
-                               tenders: scoredTenders,
-                             }
-                           : a
-                       ),
-                     }));
-                   }
-
-                 // Handle errors
-                 if (data.type === 'ERROR') {
-                   clearTimeout(executionTimeout);
-                    clearTimeout(streamingUrlTimeout);
-                    setState(prev => ({
-                      ...prev,
-                      agents: prev.agents.map(a =>
-                        a.id === agentId
-                          ? {
-                              ...a,
-                              status: 'error' as const,
-                              message: data.error || 'Unknown error',
-                            }
-                          : a
-                      ),
-                    }));
-                  }
-
-                  // Handle done
-                  if (data.type === 'DONE') {
-                    clearTimeout(streamingUrlTimeout);
-                    clearTimeout(executionTimeout);
-                    setState(prev => ({
-                      ...prev,
-                      agents: prev.agents.map(a =>
-                        a.id === agentId && a.status === 'searching'
-                          ? {
-                              ...a,
-                              status: 'complete' as const,
-                              message: 'Search complete',
-                            }
-                          : a
-                      ),
-                    }));
-                  }
-                } catch (e) {
-                  // Ignore parsing errors
-                }
+              // STARTED event
+              if (data.type === 'STARTED') {
+                setState(prev => ({
+                  ...prev,
+                  agents: prev.agents.map(a =>
+                    a.id === agentId
+                      ? { ...a, status: 'connecting', message: 'Agent started, browsing...' }
+                      : a
+                  ),
+                }));
+                continue;
               }
+
+              // STREAMING_URL event
+              if (data.type === 'STREAMING_URL' && data.streamingUrl) {
+                receivedStreamingUrl = true;
+                if (timeoutRefsRef.current.streamingUrl) {
+                  clearTimeout(timeoutRefsRef.current.streamingUrl);
+                  timeoutRefsRef.current.streamingUrl = undefined;
+                }
+                setState(prev => ({
+                  ...prev,
+                  agents: prev.agents.map(a =>
+                    a.id === agentId
+                      ? { ...a, status: 'searching', message: 'Browsing website...', streamingUrl: data.streamingUrl }
+                      : a
+                  ),
+                }));
+                continue;
+              }
+
+              // STATUS event (from PROGRESS)
+              if (data.type === 'STATUS' && data.message) {
+                setState(prev => ({
+                  ...prev,
+                  agents: prev.agents.map(a =>
+                    a.id === agentId ? { ...a, message: data.message } : a
+                  ),
+                }));
+                continue;
+              }
+
+              // COMPLETE event
+              if (data.type === 'COMPLETE') {
+                if (timeoutRefsRef.current.execution) {
+                  clearTimeout(timeoutRefsRef.current.execution);
+                  timeoutRefsRef.current.execution = undefined;
+                }
+
+                let tenders: any[] = [];
+                const resultData = data.result || data.tenders;
+
+                if (resultData) {
+                  if (typeof resultData === 'string') {
+                    try {
+                      const jsonMatch = resultData.match(/```json\s*([\s\S]*?)\s*```/) ||
+                                        resultData.match(/```\s*([\s\S]*?)\s*```/);
+                      const parsed = jsonMatch ? JSON.parse(jsonMatch[1]) : JSON.parse(resultData);
+                      resultData = parsed;
+                    } catch (e) {
+                      console.error(`Agent ${agentId}: Failed to parse result`, e);
+                      resultData = null;
+                    }
+                  }
+
+                  if (resultData?.tenderdetails && Array.isArray(resultData.tenderdetails)) {
+                    tenders = resultData.tenderdetails;
+                  } else if (Array.isArray(resultData)) {
+                    tenders = resultData;
+                  }
+                }
+
+                const newTenders: Tender[] = tenders.map((t: any) => ({
+                  id: generateId(),
+                  tenderTitle: t['Tender Title'] || t.tenderTitle || 'Unknown',
+                  tenderId: t['Tender ID'] || t.tenderId || 'N/A',
+                  issuingAuthority: t['Issuing Authority'] || t.issuingAuthority || 'Unknown',
+                  countryRegion: t['Country / Region'] || t.countryRegion || 'Singapore',
+                  tenderType: t['Tender Type'] || t.tenderType || 'N/A',
+                  publicationDate: t['Publication Date'] || t.publicationDate || 'N/A',
+                  submissionDeadline: t['Submission Deadline'] || t.submissionDeadline || 'N/A',
+                  tenderStatus: t['Tender Status'] || t.tenderStatus || 'Open',
+                  officialTenderUrl: t['Official Tender URL'] || t.officialTenderUrl || url,
+                  briefDescription: t['Brief Description'] || t.briefDescription || 'No description',
+                  eligibilityCriteria: t['Eligibility Criteria'] || t.eligibilityCriteria || 'See tender',
+                  industryCategory: t['Industry / Category'] || t.industryCategory || sector,
+                  sourceUrl: url,
+                  complexityLevel: t['Complexity Level'] || t.complexityLevel,
+                  requiredCompanySize: t['Required Company Size'] || t.requiredCompanySize,
+                  requiredCertifications: t['Required Certifications'] || t.requiredCertifications || [],
+                  evaluationCriteria: t['Evaluation Criteria'] || t.evaluationCriteria,
+                  scopeOfWork: t['Scope of Work'] || t.scopeOfWork,
+                  estimatedContractValue: t['Estimated Contract Value'] || t.estimatedContractValue || null,
+                }));
+
+                const scoredTenders = newTenders.map(tender => ({
+                  ...tender,
+                  score: localProfile ? calculateScore(tender, localProfile) : 1,
+                  matchReason: localProfile ? analyzeMatch(tender, localProfile).reason : '',
+                  missingRequirements: localProfile ? analyzeMatch(tender, localProfile).missing : [],
+                }));
+
+                setState(prev => ({
+                  ...prev,
+                  tenders: [...prev.tenders, ...scoredTenders],
+                  agents: prev.agents.map(a =>
+                    a.id === agentId
+                      ? { ...a, status: 'complete', message: `Found ${scoredTenders.length} tenders`, tenders: scoredTenders }
+                      : a
+                  ),
+                }));
+                continue;
+              }
+
+              // ERROR event
+              if (data.type === 'ERROR') {
+                if (timeoutRefsRef.current.execution) {
+                  clearTimeout(timeoutRefsRef.current.execution);
+                  timeoutRefsRef.current.execution = undefined;
+                }
+                setState(prev => ({
+                  ...prev,
+                  agents: prev.agents.map(a =>
+                    a.id === agentId
+                      ? { ...a, status: 'error', message: data.error || 'Unknown error' }
+                      : a
+                  ),
+                }));
+                continue;
+              }
+
+              // DONE event
+              if (data.type === 'DONE') {
+                if (timeoutRefsRef.current.execution) {
+                  clearTimeout(timeoutRefsRef.current.execution);
+                  timeoutRefsRef.current.execution = undefined;
+                }
+                setState(prev => ({
+                  ...prev,
+                  agents: prev.agents.map(a =>
+                    a.id === agentId && a.status === 'searching'
+                      ? { ...a, status: 'complete', message: 'Search complete' }
+                      : a
+                  ),
+                }));
+                continue;
+              }
+
+            } catch (e) {
+              // Skip malformed lines
+              if (e instanceof Error && e.message.includes('aborted')) {
+                throw e; // re-throw abort errors
+              }
+              console.error(`Agent ${agentId}: Parse error`, e);
             }
           }
         }
+
       } catch (error) {
-        if ((error as Error).name === 'AbortError') {
+        if (error instanceof Error && error.name === 'AbortError') {
           console.log(`Agent ${agentId} aborted`);
           return;
         }
+
         console.error(`Agent ${agentId} error:`, error);
         setState(prev => ({
           ...prev,
           agents: prev.agents.map(a =>
             a.id === agentId
-              ? {
-                  ...a,
-                  status: 'error' as const,
-                  message: error instanceof Error ? error.message : 'Unknown error',
-                }
+              ? { ...a, status: 'error', message: error instanceof Error ? error.message : 'Unknown error' }
               : a
           ),
         }));
       }
     });
 
-    // Wait for all agents to complete
     await Promise.allSettled(agentPromises);
 
-    setState(prev => ({
-      ...prev,
-      isSearching: false,
-    }));
+    // Final cleanup
+    abortControllersRef.current.forEach(c => c.abort());
+    if (timeoutRefsRef.current.streamingUrl) clearTimeout(timeoutRefsRef.current.streamingUrl);
+    if (timeoutRefsRef.current.execution) clearTimeout(timeoutRefsRef.current.execution);
+
+    setState(prev => ({ ...prev, isSearching: false }));
   }, []);
 
   const toggleTenderSelection = useCallback((tenderId: string) => {
@@ -464,8 +477,11 @@ export function useTenderSearch() {
   }, []);
 
   const resetSearch = useCallback(() => {
-    abortControllersRef.current.forEach(controller => controller.abort());
+    abortControllersRef.current.forEach(c => c.abort());
+    if (timeoutRefsRef.current.streamingUrl) clearTimeout(timeoutRefsRef.current.streamingUrl);
+    if (timeoutRefsRef.current.execution) clearTimeout(timeoutRefsRef.current.execution);
     abortControllersRef.current = [];
+    timeoutRefsRef.current = {};
     setState({
       isSearching: false,
       selectedSector: null,

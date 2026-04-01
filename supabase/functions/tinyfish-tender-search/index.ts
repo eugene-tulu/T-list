@@ -92,7 +92,7 @@ Return JSON:
               'Content-Type': 'application/json',
               'X-API-Key': apiKey,
             },
-            body: JSON.stringify({ url, goal }),
+            body: JSON.stringify({ url, goal, browser_profile: 'lite' }),
           });
 
           if (!response.ok) {
@@ -125,50 +125,77 @@ Return JSON:
                   try {
                     const data = JSON.parse(line.slice(6));
                     
-                    // Forward streamingUrl immediately
-                    if (data.streamingUrl) {
-                      console.log(`[${agentId}] Got streaming URL:`, data.streamingUrl);
+                    // Forward STARTED event
+                    if (data.type === 'STARTED') {
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                        type: 'STARTED', 
+                        agentId, 
+                        run_id: data.run_id,
+                        timestamp: data.timestamp 
+                      })}\n\n`));
+                    }
+
+                    // Forward streaming URL (TinyFish uses snake_case: streaming_url)
+                    if (data.type === 'STREAMING_URL' && data.streaming_url) {
+                      console.log(`[${agentId}] Got streaming URL:`, data.streaming_url);
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
                         type: 'STREAMING_URL', 
                         agentId, 
-                        streamingUrl: data.streamingUrl 
+                        streamingUrl: data.streaming_url, // transform to camelCase for client
+                        run_id: data.run_id,
+                        timestamp: data.timestamp 
                       })}\n\n`));
                     }
 
-                    // Forward status updates
-                    if (data.type === 'STATUS' && data.message) {
+                    // Forward PROGRESS events as STATUS updates (transform purpose -> message)
+                    if (data.type === 'PROGRESS' && data.purpose) {
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
-                        type: 'STATUS', 
+                        type: 'STATUS', // Transform to STATUS for backward compatibility with hook
                         agentId, 
-                        message: data.message 
+                        message: data.purpose, // transform purpose to message
+                        run_id: data.run_id,
+                        timestamp: data.timestamp 
                       })}\n\n`));
                     }
 
-                    // Forward completion with results
+                    // Forward HEARTBEAT events (optional, can be ignored by hook)
+                    if (data.type === 'HEARTBEAT') {
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                        type: 'HEARTBEAT', 
+                        agentId, 
+                        timestamp: data.timestamp 
+                      })}\n\n`));
+                    }
+
+                    // Handle completion with results
                     if (data.type === 'COMPLETE') {
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       let tenders: any[] = [];
-                      let resultJson = data.resultJson;
+                      let resultData = data.result; // TinyFish sends 'result' not 'resultJson'
                       
-                      if (resultJson) {
-                        if (typeof resultJson === 'string') {
+                      if (resultData) {
+                        // Handle string results (LLM might return JSON as string)
+                        if (typeof resultData === 'string') {
                           try {
-                            const jsonMatch = resultJson.match(/```json\s*([\s\S]*?)\s*```/) || 
-                                             resultJson.match(/```\s*([\s\S]*?)\s*```/);
+                            // Try to extract JSON from markdown code blocks
+                            const jsonMatch = resultData.match(/```json\s*([\s\S]*?)\s*```/) || 
+                                             resultData.match(/```\s*([\s\S]*?)\s*```/);
                             if (jsonMatch) {
-                              resultJson = JSON.parse(jsonMatch[1]);
+                              resultData = JSON.parse(jsonMatch[1]);
                             } else {
-                              resultJson = JSON.parse(resultJson);
+                              resultData = JSON.parse(resultData);
                             }
                           } catch (e) {
-                            console.error(`[${agentId}] Failed to parse resultJson`);
+                            console.error(`[${agentId}] Failed to parse result:`, e);
+                            resultData = null;
                           }
                         }
                         
-                        if (resultJson?.tenderdetails && Array.isArray(resultJson.tenderdetails)) {
-                          tenders = resultJson.tenderdetails;
-                        } else if (Array.isArray(resultJson)) {
-                          tenders = resultJson;
+                        // Extract tenderdetails array
+                        if (resultData?.tenderdetails && Array.isArray(resultData.tenderdetails)) {
+                          tenders = resultData.tenderdetails;
+                        } else if (Array.isArray(resultData)) {
+                          tenders = resultData;
                         }
                       }
 
@@ -176,11 +203,35 @@ Return JSON:
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
                         type: 'COMPLETE', 
                         agentId, 
-                        tenders 
+                        tenders,
+                        status: data.status || 'COMPLETED',
+                        error: data.error,
+                        run_id: data.run_id,
+                        timestamp: data.timestamp 
+                      })}\n\n`));
+                    }
+
+                    // Handle errors from TinyFish
+                    if (data.type === 'ERROR' || data.error) {
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                        type: 'ERROR', 
+                        agentId, 
+                        error: data.error || (data as any).message || 'Unknown error from TinyFish'
+                      })}\n\n`));
+                    }
+
+                    // Handle DONE (final event from TinyFish)
+                    if (data.type === 'DONE') {
+                      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
+                        type: 'DONE', 
+                        agentId,
+                        run_id: data.run_id,
+                        timestamp: data.timestamp 
                       })}\n\n`));
                     }
                   } catch (e) {
-                    // Ignore parsing errors
+                    // Ignore parsing errors for individual lines
+                    console.error(`[${agentId}] Failed to parse SSE line:`, e);
                   }
                 }
               }
