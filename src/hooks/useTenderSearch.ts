@@ -289,10 +289,10 @@ export function useTenderSearch() {
         let buffer = '';
         let receivedStreamingUrl = false;
 
-        // Timeout for first STREAMING_URL (60s)
+        // Timeout for first STREAMING_URL (120s) - but streaming preview may be broken
         timeoutRefsRef.current.streamingUrl = setTimeout(() => {
           if (!receivedStreamingUrl) {
-            console.warn(`Agent ${agentId}: No streaming URL after 60s`);
+            console.warn(`Agent ${agentId}: No streaming URL after 120s - continuing without preview`);
             setState(prev => ({
               ...prev,
               agents: prev.agents.map(a =>
@@ -302,11 +302,11 @@ export function useTenderSearch() {
               ),
             }));
           }
-        }, 60000);
+        }, 120000);
 
-        // Overall execution timeout (5min)
+        // Overall execution timeout (10min) - increased for slow tender portals
         timeoutRefsRef.current.execution = setTimeout(() => {
-          console.warn(`Agent ${agentId}: Execution timeout after 5min`);
+          console.warn(`Agent ${agentId}: Execution timeout after 10min`);
           setState(prev => ({
             ...prev,
             agents: prev.agents.map(a =>
@@ -316,7 +316,7 @@ export function useTenderSearch() {
             ),
           }));
           abortController.abort();
-        }, 300000);
+        }, 600000); // 10 minutes
 
         if (!reader) {
           throw new Error('No response body reader');
