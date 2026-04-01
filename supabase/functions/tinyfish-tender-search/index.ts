@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { sector, url, agentId } = await req.json();
+    const { sector, url, agentId, country = 'Singapore' } = await req.json();
 
     if (!sector || !url) {
       return new Response(
@@ -39,7 +39,7 @@ Deno.serve(async (req) => {
       day: 'numeric',
     });
 
-    const goal = `TASK: Extract government tenders in Singapore for the field of ${sector}.
+    const goal = `TASK: Extract government tenders in ${country} for the field of ${sector}.
 
 CURRENT DATE: ${currentDate}
 IMPORTANT: Only return tenders with submission deadlines that are AFTER today's date.
@@ -58,7 +58,7 @@ Return JSON:
       "Tender Title": "Full title of the tender",
       "Tender ID": "Official tender reference number",
       "Issuing Authority": "Government agency",
-      "Country / Region": "Singapore",
+      "Country / Region": "${country}",
       "Tender Type": "Open/Selective/Limited",
       "Publication Date": "Date published",
       "Submission Deadline": "Last date to submit",
@@ -164,7 +164,9 @@ Return JSON:
                     if (data.type === 'COMPLETE') {
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       let tenders: any[] = [];
-                      let resultData = data.result; // TinyFish sends 'result' not 'resultJson'
+                      
+                      // Try multiple possible result field names (TinyFish API variation)
+                      let resultData = data.result || data.resultJson;
                       
                       // Log EVERYTHING for debugging
                       console.log(`[${agentId}] COMPLETE event full data:`, JSON.stringify(data, null, 2));

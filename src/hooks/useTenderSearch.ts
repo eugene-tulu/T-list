@@ -230,6 +230,7 @@ export function useTenderSearch() {
     }));
 
     const localProfile = profile;
+    const country = profile.country || 'Singapore';
 
     // Clear any existing abort controllers and timeouts
     abortControllersRef.current.forEach(c => c.abort());
@@ -268,7 +269,7 @@ export function useTenderSearch() {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
           },
-          body: JSON.stringify({ sector, url, agentId }),
+          body: JSON.stringify({ sector, url, agentId, country }),
           signal: abortController.signal,
         });
 
