@@ -50,7 +50,6 @@ RULES:
 3) Scroll through the page to find tenders
 4) Be fast and efficient
 5) Find tenders with upcoming deadlines
-6) For each tender, click into the details page if needed to extract complete information
 
 Return JSON:
 {
@@ -67,13 +66,7 @@ Return JSON:
       "Official Tender URL": "Direct link",
       "Brief Description": "Short summary",
       "Eligibility Criteria": "Requirements",
-      "Industry / Category": "${sector}",
-      "Complexity Level": "low/medium/high based on scope and requirements",
-      "Required Company Size": "SME/enterprise/any (infer from eligibility criteria)",
-      "Required Certifications": ["ISO 9001", "ISO 27001", etc] or [] if none specified,
-      "Evaluation Criteria": "Summary of how tenders are evaluated (price/quality/technical etc)",
-      "Scope of Work": "Brief summary of what needs to be delivered",
-      "Estimated Contract Value": "If mentioned, otherwise null"
+      "Industry / Category": "${sector}"
     }
   ]
 }`;
@@ -92,7 +85,7 @@ Return JSON:
               'Content-Type': 'application/json',
               'X-API-Key': apiKey,
             },
-            body: JSON.stringify({ url, goal, browser_profile: 'lite' }),
+            body: JSON.stringify({ url, goal }),
           });
 
           if (!response.ok) {
