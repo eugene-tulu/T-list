@@ -15,6 +15,7 @@ import { Sector } from '@/types/tender';
 interface SectorSelectorProps {
   onSelectSector: (sector: Sector) => void;
   disabled?: boolean;
+  selectedSector?: Sector | null;
 }
 
 const SECTORS: { sector: Sector; icon: typeof Monitor; label: string; description: string }[] = [
@@ -26,7 +27,7 @@ const SECTORS: { sector: Sector; icon: typeof Monitor; label: string; descriptio
   { sector: 'Education', icon: GraduationCap, label: 'Education', description: 'Training & schools' },
 ];
 
-export function SectorSelector({ onSelectSector, disabled }: SectorSelectorProps) {
+export function SectorSelector({ onSelectSector, disabled, selectedSector }: SectorSelectorProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -45,23 +46,23 @@ export function SectorSelector({ onSelectSector, disabled }: SectorSelectorProps
           <span className="text-sm font-medium">AI-Powered Tender Search</span>
         </motion.div>
         
-        <motion.h2 
+        <motion.h2
           initial={{ y: 10, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
           className="text-3xl md:text-4xl font-bold text-foreground mb-3"
         >
-          Find Singapore Government Tenders
+          Find Tenders Worldwide
         </motion.h2>
         
-        <motion.p 
+        <motion.p
           initial={{ y: 10, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.3 }}
           className="text-lg text-muted-foreground max-w-2xl mx-auto"
         >
-          Select your industry sector and our AI agents will search across 
-          <span className="text-primary font-semibold"> 7 major tender platforms </span>
+          Select your industry sector and our AI agents will search across
+          <span className="text-primary font-semibold"> multiple global tender portals </span>
           simultaneously
         </motion.p>
       </div>
@@ -86,6 +87,7 @@ export function SectorSelector({ onSelectSector, disabled }: SectorSelectorProps
               description={description}
               onClick={() => onSelectSector(sector)}
               disabled={disabled}
+              selected={selectedSector === sector}
             />
           </motion.div>
         ))}
@@ -100,7 +102,7 @@ export function SectorSelector({ onSelectSector, disabled }: SectorSelectorProps
       >
         <div className="inline-flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-4 py-2 rounded-full">
           <Search className="w-4 h-4" />
-          <span>Searches GeBIZ, TendersOnTime, BidDetail, and more</span>
+          <span>Searches multiple global tender portals</span>
         </div>
       </motion.div>
     </motion.div>

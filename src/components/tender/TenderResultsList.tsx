@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { TenderResultCard } from './TenderResultCard';
+import { DailyBriefPanel } from './DailyBriefPanel';
 import { Tender } from '@/types/tender';
 import { ArrowDown } from 'lucide-react';
 
@@ -19,6 +20,9 @@ export function TenderResultsList({
   if (tenders.length === 0 && !isSearching) {
     return null;
   }
+
+  // Sort tenders by score (highest first)
+  const sortedTenders = [...tenders].sort((a, b) => (b.score || 0) - (a.score || 0));
 
   return (
     <motion.div
@@ -41,11 +45,16 @@ export function TenderResultsList({
         </motion.div>
       )}
 
+      {/* Daily Brief Panel - show when not searching and have results */}
+      {!isSearching && sortedTenders.length > 0 && (
+        <DailyBriefPanel tenders={sortedTenders} />
+      )}
+
       {/* Results Header */}
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold text-foreground">
-            {isSearching ? 'Results Found So Far' : 'Search Results'}
+            {isSearching ? 'Results Found So Far' : 'All Results'}
           </h3>
           <p className="text-sm text-muted-foreground">
             {tenders.length} tender{tenders.length !== 1 ? 's' : ''} found
@@ -57,7 +66,7 @@ export function TenderResultsList({
       {/* Results Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <AnimatePresence mode="popLayout">
-          {tenders.map((tender, index) => (
+          {sortedTenders.map((tender, index) => (
             <motion.div
               key={tender.id}
               initial={{ opacity: 0, y: 20 }}

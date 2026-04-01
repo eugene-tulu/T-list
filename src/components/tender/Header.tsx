@@ -20,7 +20,7 @@ export function Header() {
             </div>
             <Waves className="w-3 h-3 text-primary absolute -bottom-0.5 -right-0.5 animate-pulse" />
           </motion.div>
-          <p className="text-sm text-muted-foreground font-medium">Singapore Tender Finder</p>
+          <p className="text-sm text-muted-foreground font-medium">Universal Tender Finder</p>
         </div>
         <div className="hidden md:flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
           <span className="relative flex h-2 w-2">

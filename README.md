@@ -1,7 +1,5 @@
 # Government Tender Finder - Singapore
 
-**Live Demo:** https://tender-scout-singapore.lovable.app
-
 ## What This Project Is
 
 An AI-powered government tender discovery tool for Singapore. It scrapes multiple tender portals in parallel using the TinyFish API, extracts structured tender data, and presents results in a clean, comparable format.

@@ -1,16 +1,18 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { Header } from '@/components/tender/Header';
 import { SectorSelector } from '@/components/tender/SectorSelector';
+import { SupplierProfileForm } from '@/components/tender/SupplierProfileForm';
 import { LinkConfigPage } from '@/components/tender/LinkConfigPage';
 import { AgentPreviewGrid } from '@/components/tender/AgentPreviewGrid';
 import { TenderResultsList } from '@/components/tender/TenderResultsList';
 import { CompareButton } from '@/components/tender/CompareButton';
 import { CompareModal } from '@/components/tender/CompareModal';
 import { useTenderSearch } from '@/hooks/useTenderSearch';
-import { Sector } from '@/types/tender';
+import { useSupplierProfile } from '@/hooks/useSupplierProfile';
+import { Sector, SupplierProfile } from '@/types/tender';
 
-type ViewState = 'selector' | 'config' | 'search';
+type ViewState = 'supplier-profile' | 'config' | 'search';
 
 const Index = () => {
   const {
@@ -25,33 +27,49 @@ const Index = () => {
     resetSearch,
   } = useTenderSearch();
 
-  const [view, setView] = useState<ViewState>('selector');
-  const [pendingSector, setPendingSector] = useState<Sector | null>(null);
+  const { profile: savedProfile, saveProfile, loading: profileLoading } = useSupplierProfile();
+
+  const [view, setView] = useState<ViewState>('supplier-profile');
+  const [pendingProfile, setPendingProfile] = useState<SupplierProfile | null>(null);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
+
+  // Use saved profile if available and no pending profile
+  useEffect(() => {
+    if (!pendingProfile && savedProfile && view === 'supplier-profile') {
+      setPendingProfile(savedProfile);
+    }
+  }, [savedProfile, pendingProfile, view]);
 
   const selectedTendersList = tenders.filter(t => selectedTenders.has(t.id));
 
-  const handleSectorSelect = (sector: Sector) => {
-    setPendingSector(sector);
+  // Sort tenders by score (highest first)
+  const sortedTenders = useMemo(() => {
+    return [...tenders].sort((a, b) => (b.score || 0) - (a.score || 0));
+  }, [tenders]);
+
+  const handleBackToForm = () => {
+    setPendingProfile(null);
+    setView('supplier-profile');
+  };
+
+  const handleSupplierProfileComplete = async (profile: SupplierProfile) => {
+    // Save profile to Supabase
+    await saveProfile(profile);
+    setPendingProfile(profile);
     setView('config');
   };
 
-  const handleBackToSelector = () => {
-    setPendingSector(null);
-    setView('selector');
-  };
-
   const handleStartSearchWithLinks = (links: string[]) => {
-    if (pendingSector) {
-      startSearch(pendingSector, links);
+    if (pendingProfile) {
+      startSearch(pendingProfile.sector, links, pendingProfile);
       setView('search');
     }
   };
 
   const handleReset = () => {
     resetSearch();
-    setPendingSector(null);
-    setView('selector');
+    setPendingProfile(null);
+    setView('supplier-profile');
   };
 
   const handleCompare = () => {
@@ -68,19 +86,20 @@ const Index = () => {
 
       <main className="py-8">
         <AnimatePresence mode="wait">
-          {view === 'selector' && (
-            <SectorSelector 
-              key="selector"
-              onSelectSector={handleSectorSelect} 
-              disabled={isSearching}
+          {view === 'supplier-profile' && (
+            <SupplierProfileForm
+              key="supplier-profile"
+              sector={null}
+              onBack={() => {}}
+              onComplete={handleSupplierProfileComplete}
             />
           )}
 
-          {view === 'config' && pendingSector && (
+          {view === 'config' && pendingProfile && (
             <LinkConfigPage
               key="config"
-              sector={pendingSector}
-              onBack={handleBackToSelector}
+              sector={pendingProfile.sector}
+              onBack={handleBackToForm}
               onStartSearch={handleStartSearchWithLinks}
             />
           )}
@@ -93,19 +112,19 @@ const Index = () => {
                   onClick={handleReset}
                   className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-2 transition-colors"
                 >
-                  ← Back to sectors
+                  ← Start new search
                 </button>
               </div>
 
               {/* Agent Preview Grid */}
-              <AgentPreviewGrid 
-                agents={agents} 
-                sector={selectedSector} 
+              <AgentPreviewGrid
+                agents={agents}
+                sector={selectedSector}
               />
 
               {/* Results List */}
               <TenderResultsList
-                tenders={tenders}
+                tenders={sortedTenders}
                 selectedTenders={selectedTenders}
                 onToggleSelect={toggleTenderSelection}
                 isSearching={isSearching}

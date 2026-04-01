@@ -14,7 +14,41 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      supplier_profiles: {
+        Row: {
+          id: string;
+          user_id: string;
+          company_name: string;
+          country: string;
+          sector: string;
+          company_size: 'SME' | 'enterprise' | 'any' | null;
+          past_projects: string | null;
+          certifications: string[];
+          max_contract_size: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          company_name: string;
+          country: string;
+          sector: string;
+          company_size?: 'SME' | 'enterprise' | 'any' | null;
+          past_projects?: string | null;
+          certifications?: string[] | null;
+          max_contract_size?: number | null;
+        };
+        Update: {
+          company_name?: string;
+          country?: string;
+          sector?: string;
+          company_size?: 'SME' | 'enterprise' | 'any' | null;
+          past_projects?: string | null;
+          certifications?: string[] | null;
+          max_contract_size?: number | null;
+          updated_at?: string;
+        };
+      };
     }
     Views: {
       [_ in never]: never

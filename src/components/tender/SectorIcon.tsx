@@ -8,9 +8,10 @@ interface SectorIconProps {
   description?: string;
   onClick: () => void;
   disabled?: boolean;
+  selected?: boolean;
 }
 
-export function SectorIcon({ icon: Icon, label, description, onClick, disabled }: SectorIconProps) {
+export function SectorIcon({ icon: Icon, label, description, onClick, disabled, selected }: SectorIconProps) {
   return (
     <motion.button
       whileHover={{ scale: disabled ? 1 : 1.03, y: disabled ? 0 : -4 }}
@@ -20,7 +21,9 @@ export function SectorIcon({ icon: Icon, label, description, onClick, disabled }
       className={cn(
         "relative w-full flex flex-col items-center gap-3 p-6 rounded-2xl border-2 transition-all duration-300",
         "bg-gradient-to-br from-white to-muted/30 hover:from-primary/5 hover:to-primary/10",
-        "hover:border-primary hover:shadow-xl hover:shadow-primary/10",
+        selected 
+          ? "border-primary bg-primary/10 shadow-lg shadow-primary/15" 
+          : "hover:border-primary hover:shadow-xl hover:shadow-primary/10",
         "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
         "group",
         disabled && "opacity-50 cursor-not-allowed"
