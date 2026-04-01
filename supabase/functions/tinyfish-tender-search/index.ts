@@ -166,8 +166,10 @@ Return JSON:
                       let tenders: any[] = [];
                       let resultData = data.result; // TinyFish sends 'result' not 'resultJson'
                       
-                      // Log raw result for debugging
-                      console.log(`[${agentId}] COMPLETE event raw result:`, resultData);
+                      // Log EVERYTHING for debugging
+                      console.log(`[${agentId}] COMPLETE event full data:`, JSON.stringify(data, null, 2));
+                      console.log(`[${agentId}] COMPLETE raw result field:`, resultData);
+                      console.log(`[${agentId}] result type:`, typeof resultData);
                       
                       if (resultData) {
                         // Handle string results (LLM might return JSON as string)
@@ -177,12 +179,16 @@ Return JSON:
                             const jsonMatch = resultData.match(/```json\s*([\s\S]*?)\s*```/) || 
                                              resultData.match(/```\s*([\s\S]*?)\s*```/);
                             if (jsonMatch) {
+                              console.log(`[${agentId}] Found JSON in markdown codeblock`);
                               resultData = JSON.parse(jsonMatch[1]);
                             } else {
+                              console.log(`[${agentId}] Attempting direct JSON parse of string`);
                               resultData = JSON.parse(resultData);
                             }
+                            console.log(`[${agentId}] Parsed result data:`, resultData);
                           } catch (e) {
                             console.error(`[${agentId}] Failed to parse result:`, e);
+                            console.error(`[${agentId}] Raw string that failed:`, resultData);
                             resultData = null;
                           }
                         }
@@ -190,15 +196,18 @@ Return JSON:
                         // Extract tenderdetails array
                         if (resultData?.tenderdetails && Array.isArray(resultData.tenderdetails)) {
                           tenders = resultData.tenderdetails;
+                          console.log(`[${agentId}] Extracted ${tenders.length} tenders from tenderdetails`);
                         } else if (Array.isArray(resultData)) {
                           tenders = resultData;
+                          console.log(`[${agentId}] Extracted ${tenders.length} tenders from direct array`);
+                        } else {
+                          console.warn(`[${agentId}] No tenders found in result. Result keys:`, resultData ? Object.keys(resultData) : 'null');
                         }
+                      } else {
+                        console.warn(`[${agentId}] COMPLETE with no result field`);
                       }
 
-                      console.log(`[${agentId}] Complete with ${tenders.length} tenders after parsing`);
-                      if (tenders.length === 0) {
-                        console.warn(`[${agentId}] No tenders extracted! Check LLM response format.`);
-                      }
+                      console.log(`[${agentId}] Final tender count: ${tenders.length}`);
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
                         type: 'COMPLETE', 
                         agentId, 
