@@ -166,6 +166,9 @@ Return JSON:
                       let tenders: any[] = [];
                       let resultData = data.result; // TinyFish sends 'result' not 'resultJson'
                       
+                      // Log raw result for debugging
+                      console.log(`[${agentId}] COMPLETE event raw result:`, resultData);
+                      
                       if (resultData) {
                         // Handle string results (LLM might return JSON as string)
                         if (typeof resultData === 'string') {
@@ -192,7 +195,10 @@ Return JSON:
                         }
                       }
 
-                      console.log(`[${agentId}] Complete with ${tenders.length} tenders`);
+                      console.log(`[${agentId}] Complete with ${tenders.length} tenders after parsing`);
+                      if (tenders.length === 0) {
+                        console.warn(`[${agentId}] No tenders extracted! Check LLM response format.`);
+                      }
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
                         type: 'COMPLETE', 
                         agentId, 
