@@ -1,10 +1,72 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Sector, Tender, AgentState, TenderSearchState, SupplierProfile } from '@/types/tender';
+import { Sector, Tender, AgentState, TenderSearchState, SupplierProfile, ComplexityLevel, CompanySize } from '@/types/tender';
 
 const generateId = () => Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
+// Raw tender data from TinyFish (loose typing for LLM output)
+interface RawTenderData {
+  'Tender Title'?: string;
+  tenderTitle?: string;
+  'Tender ID'?: string;
+  tenderId?: string;
+  'Issuing Authority'?: string;
+  issuingAuthority?: string;
+  'Country / Region'?: string;
+  countryRegion?: string;
+  'Tender Type'?: string;
+  tenderType?: string;
+  'Publication Date'?: string;
+  publicationDate?: string;
+  'Submission Deadline'?: string;
+  submissionDeadline?: string;
+  'Tender Status'?: string;
+  tenderStatus?: string;
+  'Official Tender URL'?: string;
+  officialTenderUrl?: string;
+  'Brief Description'?: string;
+  briefDescription?: string;
+  'Eligibility Criteria'?: string;
+  eligibilityCriteria?: string;
+  'Industry / Category'?: string;
+  industryCategory?: string;
+  'Complexity Level'?: string;
+  complexityLevel?: string;
+  'Required Company Size'?: string;
+  requiredCompanySize?: string;
+  'Required Certifications'?: string[];
+  requiredCertifications?: string[];
+  'Evaluation Criteria'?: string;
+  evaluationCriteria?: string;
+  'Scope of Work'?: string;
+  scopeOfWork?: string;
+  'Estimated Contract Value'?: string | number;
+  estimatedContractValue?: string | number;
+}
+
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+// Check if a URL is likely to be inaccessible (private IP, localhost, etc.)
+function isInaccessibleStreamingUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    
+    // Check for private IP ranges
+    const privateIpPatterns = [
+      /^127\./,           // 127.0.0.0/8 (localhost)
+      /^10\./,            // 10.0.0.0/8
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
+      /^192\.168\./,      // 192.168.0.0/16
+      /^localhost$/i,     // localhost
+      /^ip-\d+-\d+-\d+-\d+\./i, // IP-based hostnames like ip-13-57-212-91
+    ];
+    
+    return privateIpPatterns.some(pattern => pattern.test(hostname));
+  } catch {
+    return true; // Invalid URL is considered inaccessible
+  }
+}
 
 export function useTenderSearch() {
   const [state, setState] = useState<TenderSearchState>({
@@ -294,14 +356,30 @@ export function useTenderSearch() {
                   clearTimeout(timeoutRefsRef.current.streamingUrl);
                   timeoutRefsRef.current.streamingUrl = undefined;
                 }
+                
+                // Check if the streaming URL is accessible
+                const inaccessible = isInaccessibleStreamingUrl(data.streamingUrl);
+                const message = inaccessible
+                  ? 'Processing (live preview unavailable - internal server error)'
+                  : 'Browsing website...';
+                
                 setState(prev => ({
                   ...prev,
                   agents: prev.agents.map(a =>
                     a.id === agentId
-                      ? { ...a, status: 'searching', message: 'Browsing website...', streamingUrl: data.streamingUrl }
+                      ? {
+                          ...a,
+                          status: 'searching',
+                          message: message,
+                          streamingUrl: inaccessible ? undefined : data.streamingUrl
+                        }
                       : a
                   ),
                 }));
+                
+                if (inaccessible) {
+                  console.warn(`Agent ${agentId}: Inaccessible streaming URL detected:`, data.streamingUrl);
+                }
                 continue;
               }
 
@@ -323,8 +401,8 @@ export function useTenderSearch() {
                   timeoutRefsRef.current.execution = undefined;
                 }
 
-                let tenders: any[] = [];
-                const resultData = data.result || data.tenders;
+                let tenders: RawTenderData[] = [];
+                let resultData = data.result || data.tenders;
 
                 if (resultData) {
                   if (typeof resultData === 'string') {
@@ -346,7 +424,7 @@ export function useTenderSearch() {
                   }
                 }
 
-                const newTenders: Tender[] = tenders.map((t: any) => ({
+                const newTenders: Tender[] = tenders.map((t: RawTenderData) => ({
                   id: generateId(),
                   tenderTitle: t['Tender Title'] || t.tenderTitle || 'Unknown',
                   tenderId: t['Tender ID'] || t.tenderId || 'N/A',
@@ -361,12 +439,14 @@ export function useTenderSearch() {
                   eligibilityCriteria: t['Eligibility Criteria'] || t.eligibilityCriteria || 'See tender',
                   industryCategory: t['Industry / Category'] || t.industryCategory || sector,
                   sourceUrl: url,
-                  complexityLevel: t['Complexity Level'] || t.complexityLevel,
-                  requiredCompanySize: t['Required Company Size'] || t.requiredCompanySize,
+                  complexityLevel: (t['Complexity Level'] || t.complexityLevel) as ComplexityLevel | undefined,
+                  requiredCompanySize: (t['Required Company Size'] || t.requiredCompanySize) as CompanySize | undefined,
                   requiredCertifications: t['Required Certifications'] || t.requiredCertifications || [],
                   evaluationCriteria: t['Evaluation Criteria'] || t.evaluationCriteria,
                   scopeOfWork: t['Scope of Work'] || t.scopeOfWork,
-                  estimatedContractValue: t['Estimated Contract Value'] || t.estimatedContractValue || null,
+                  estimatedContractValue: t['Estimated Contract Value'] || t.estimatedContractValue
+                    ? String(t['Estimated Contract Value'] || t.estimatedContractValue)
+                    : null,
                 }));
 
                 const scoredTenders = newTenders.map(tender => ({

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Globe, CheckCircle2, XCircle, Loader2, Maximize2, Eye, Monitor } from 'lucide-react';
+import { Globe, CheckCircle2, XCircle, Loader2, Maximize2, Eye, Monitor, AlertTriangle } from 'lucide-react';
 import { AgentState } from '@/types/tender';
 import { cn } from '@/lib/utils';
 
@@ -12,6 +12,7 @@ interface AgentPreviewCardProps {
 export function AgentPreviewCard({ agent, onExpandPreview }: AgentPreviewCardProps) {
   const [shouldHide, setShouldHide] = useState(false);
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [iframeError, setIframeError] = useState(false);
 
   // Auto-hide after completion with delay
   useEffect(() => {
@@ -27,6 +28,7 @@ export function AgentPreviewCard({ agent, onExpandPreview }: AgentPreviewCardPro
   useEffect(() => {
     if (agent.streamingUrl) {
       setIframeLoaded(false);
+      setIframeError(false);
     }
   }, [agent.streamingUrl]);
 
@@ -119,8 +121,8 @@ export function AgentPreviewCard({ agent, onExpandPreview }: AgentPreviewCardPro
       <div className="h-44 bg-gradient-to-br from-muted/30 to-muted/10 relative overflow-hidden">
         {hasLivePreview ? (
           <>
-            {/* Loading overlay */}
-            {!iframeLoaded && (
+            {/* Loading overlay or error state */}
+            {!iframeLoaded && !iframeError && (
               <div className="absolute inset-0 flex items-center justify-center bg-muted/80 z-10">
                 <div className="text-center">
                   <div className="relative mx-auto mb-2">
@@ -132,17 +134,33 @@ export function AgentPreviewCard({ agent, onExpandPreview }: AgentPreviewCardPro
               </div>
             )}
             
+            {iframeError && (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/80 z-10">
+                <div className="text-center px-4">
+                  <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
+                  <p className="text-sm font-medium text-foreground">Live preview unavailable</p>
+                  <p className="text-xs text-muted-foreground mt-1">The streaming session could not be established. The agent will continue searching in the background.</p>
+                </div>
+              </div>
+            )}
+            
             {/* Live browser iframe */}
-            <iframe
-              src={agent.streamingUrl}
-              className="w-full h-full border-0"
-              title={`Live browser preview for ${agent.name}`}
-              onLoad={() => setIframeLoaded(true)}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            />
+            {!iframeError && (
+              <iframe
+                src={agent.streamingUrl}
+                className="w-full h-full border-0"
+                title={`Live browser preview for ${agent.name}`}
+                onLoad={() => setIframeLoaded(true)}
+                onError={() => {
+                  setIframeError(true);
+                  setIframeLoaded(true);
+                }}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              />
+            )}
             
             {/* Expand button */}
-            {onExpandPreview && iframeLoaded && (
+            {onExpandPreview && iframeLoaded && !iframeError && (
               <button
                 onClick={() => onExpandPreview(agent.streamingUrl!, agent.name)}
                 className="absolute top-2 right-2 p-1.5 bg-primary/90 hover:bg-primary rounded-lg text-primary-foreground shadow-lg transition-colors z-20"

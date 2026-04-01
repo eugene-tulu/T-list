@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Monitor, Maximize2, Minimize2, Loader2 } from 'lucide-react';
+import { X, Monitor, Maximize2, Minimize2, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -14,9 +14,11 @@ interface LiveBrowserModalProps {
 export function LiveBrowserModal({ isOpen, streamingUrl, platformName, onClose }: LiveBrowserModalProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     setIsLoading(true);
+    setHasError(false);
   }, [streamingUrl]);
 
   if (!isOpen) return null;
@@ -84,7 +86,7 @@ export function LiveBrowserModal({ isOpen, streamingUrl, platformName, onClose }
 
           {/* Browser Content */}
           <div className="flex-1 bg-background relative">
-            {isLoading && (
+            {isLoading && !hasError && (
               <div className="absolute inset-0 flex items-center justify-center bg-muted/80 z-10">
                 <div className="text-center">
                   <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto mb-3" />
@@ -92,13 +94,30 @@ export function LiveBrowserModal({ isOpen, streamingUrl, platformName, onClose }
                 </div>
               </div>
             )}
-            <iframe
-              src={streamingUrl}
-              className="w-full h-full border-0"
-              title={`Live browser preview for ${platformName}`}
-              onLoad={() => setIsLoading(false)}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            />
+            
+            {hasError && (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/80 z-10">
+                <div className="text-center px-4">
+                  <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-3" />
+                  <p className="text-sm font-medium text-foreground">Live preview unavailable</p>
+                  <p className="text-xs text-muted-foreground mt-1">The streaming session could not be established. This may be due to network restrictions or the session has expired.</p>
+                </div>
+              </div>
+            )}
+            
+            {!hasError && (
+              <iframe
+                src={streamingUrl}
+                className="w-full h-full border-0"
+                title={`Live browser preview for ${platformName}`}
+                onLoad={() => setIsLoading(false)}
+                onError={() => {
+                  setHasError(true);
+                  setIsLoading(false);
+                }}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              />
+            )}
           </div>
         </motion.div>
       </motion.div>
