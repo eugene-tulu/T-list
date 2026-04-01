@@ -46,20 +46,20 @@ interface RawTenderData {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-// Check if a URL is likely to be inaccessible (private IP, localhost, etc.)
+// Check if a URL is likely to be inaccessible (private IP ranges only)
 function isInaccessibleStreamingUrl(url: string): boolean {
   try {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
     
-    // Check for private IP ranges
+    // Only block actual private IP ranges, not all ip-* hostnames
+    // TinyFish uses AWS public IPs with format ip-52-53-172-75.tetra-data.production.tinyfish.io
     const privateIpPatterns = [
       /^127\./,           // 127.0.0.0/8 (localhost)
       /^10\./,            // 10.0.0.0/8
       /^172\.(1[6-9]|2[0-9]|3[0-1])\./, // 172.16.0.0/12
       /^192\.168\./,      // 192.168.0.0/16
       /^localhost$/i,     // localhost
-      /^ip-\d+-\d+-\d+-\d+\./i, // IP-based hostnames like ip-13-57-212-91
     ];
     
     return privateIpPatterns.some(pattern => pattern.test(hostname));
