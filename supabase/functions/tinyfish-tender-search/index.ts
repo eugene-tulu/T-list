@@ -216,6 +216,16 @@ Return JSON:
                       }
 
                       console.log(`[${agentId}] Final tender count: ${tenders.length}`);
+                      
+                      // If no tenders extracted and result is a plain string, try text parsing
+                      if (tenders.length === 0 && typeof resultData === 'string' && !resultData.includes('{')) {
+                        console.log(`[${agentId}] No JSON found, attempting plain text parsing`);
+                        const textTenders = parsePlainTextTenders(resultData, sector, country);
+                        if (textTenders.length > 0) {
+                          tenders = textTenders;
+                          console.log(`[${agentId}] Parsed ${tenders.length} tenders from plain text`);
+                        }
+                      }
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify({ 
                         type: 'COMPLETE', 
                         agentId, 
@@ -284,3 +294,61 @@ Return JSON:
     );
   }
 });
+
+// Parse plain-text tender listings (fallback when LLM doesn't return JSON)
+function parsePlainTextTenders(text: string, sector: string, country: string): any[] {
+  const tenders: any[] = [];
+  
+  // Split by numbered list items: "1.", "2.", etc.
+  const items = text.split(/\n(?=\d+\.\s)/).filter(item => item.trim().length > 0);
+  
+  for (const item of items) {
+    const lines = item.split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length < 2) continue;
+    
+    // First line is the title (may have **markdown**)
+    let title = lines[0].replace(/^\d+\.\s*/, '').replace(/\*\*/g, '').trim();
+    
+    // Extract deadline, description, authority from bullet points
+    let deadline = 'Not specified';
+    let description = '';
+    let authority = 'Unknown';
+    
+    for (const line of lines.slice(1)) {
+      // Match "* **Deadline:** April 24, 2026" or "* Deadline: ..." or similar
+      if (line.includes('Deadline') || line.includes('Date')) {
+        deadline = line.replace(/[*:*]/g, '').replace(/Deadline|Date/gi, '').trim();
+      }
+      // Match "Description:" or just capture substantial text
+      if (line.includes('Description') && !description) {
+        description = line.split(':')[1]?.trim() || '';
+      }
+      // Match "Authority:" or "Source:"
+      if (line.includes('Authority') || line.includes('Source')) {
+        authority = line.split(':')[1]?.trim() || '';
+      }
+    }
+    
+    // If no explicit description, use the title as description
+    if (!description && lines.length >= 2) {
+      description = lines.slice(1).join(' ');
+    }
+    
+    tenders.push({
+      'Tender Title': title,
+      'Tender ID': 'N/A', // Will be assigned later if found
+      'Issuing Authority': authority || 'Unknown',
+      'Country / Region': country,
+      'Tender Type': 'Open', // Default assumption
+      'Publication Date': 'Not specified',
+      'Submission Deadline': deadline,
+      'Tender Status': 'Open',
+      'Official Tender URL': '', // Will need to extract if available
+      'Brief Description': description || title,
+      'Eligibility Criteria': 'See tender',
+      'Industry / Category': sector
+    });
+  }
+  
+  return tenders;
+}
